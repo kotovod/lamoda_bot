@@ -1,121 +1,114 @@
 #!/bin/bash
-# Скрипт автоматического деплоя бота на сервер
 
-echo "============================================"
-echo "🚀 ДЕПЛОЙ LAMODA MONITOR BOT НА СЕРВЕР"
-echo "============================================"
+# ========================================
+# Скрипт для переноса Lamoda Bot на сервер
+# ========================================
+
+echo "🚀 ПЕРЕНОС LAMODA BOT НА СЕРВЕР"
+echo "================================"
 echo ""
 
-# Цвета для вывода
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Запрашиваем данные сервера
+read -p "📍 Введите IP адрес сервера: " SERVER_IP
+read -p "👤 Введите username (обычно root/ubuntu): " SERVER_USER
+read -p "🔌 Введите SSH порт (обычно 22): " SERVER_PORT
 
-# Определяем имя пользователя
-CURRENT_USER=$(whoami)
-WORK_DIR="$HOME/Lamoda_bot"
-
-echo "📍 Текущий пользователь: $CURRENT_USER"
-echo "📁 Директория установки: $WORK_DIR"
+# Проверка подключения
 echo ""
+echo "🔍 Проверяем подключение к серверу..."
+ssh -p $SERVER_PORT $SERVER_USER@$SERVER_IP "echo '✅ Подключение успешно!'" || {
+    echo "❌ Не удалось подключиться к серверу"
+    echo "Проверьте IP, username и порт"
+    exit 1
+}
 
-# 1. Создание директории
-echo "1️⃣  Создание директории проекта..."
-mkdir -p "$WORK_DIR"
-cd "$WORK_DIR" || exit 1
-echo -e "${GREEN}✅ Директория создана${NC}"
 echo ""
+echo "📦 Архивируем проект..."
+cd /Users/kotovod/Desktop
+tar --exclude='venv' --exclude='*.pyc' --exclude='__pycache__' --exclude='.git' \
+    -czf Lamoda_bot_deploy.tar.gz Lamoda_bot/
 
-# 2. Клонирование/копирование файлов
-echo "2️⃣  Копирование файлов проекта..."
-echo "   (Файлы должны быть загружены вручную или через git)"
+echo "✅ Архив создан: Lamoda_bot_deploy.tar.gz"
+
 echo ""
+echo "⬆️  Загружаем на сервер..."
+scp -P $SERVER_PORT Lamoda_bot_deploy.tar.gz $SERVER_USER@$SERVER_IP:~
 
-# 3. Установка Python и зависимостей
-echo "3️⃣  Проверка Python..."
-if command -v python3 &> /dev/null; then
-    PYTHON_VERSION=$(python3 --version)
-    echo -e "${GREEN}✅ Python установлен: $PYTHON_VERSION${NC}"
-else
-    echo -e "${YELLOW}⚠️  Python не найден. Устанавливаем...${NC}"
-    if command -v apt-get &> /dev/null; then
-        sudo apt-get update
-        sudo apt-get install -y python3 python3-pip python3-venv
-    elif command -v yum &> /dev/null; then
-        sudo yum install -y python3 python3-pip
-    fi
-fi
+echo "✅ Файлы загружены!"
+
 echo ""
+echo "🔧 Настраиваем на сервере..."
 
-# 4. Создание виртуального окружения
-echo "4️⃣  Создание виртуального окружения..."
+# Выполняем команды на сервере
+ssh -p $SERVER_PORT $SERVER_USER@$SERVER_IP << 'ENDSSH'
+
+echo "📂 Распаковываем архив..."
+cd ~
+tar -xzf Lamoda_bot_deploy.tar.gz
+cd Lamoda_bot
+
+echo "🐍 Устанавливаем Python зависимости..."
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv
+
+echo "📦 Создаем виртуальное окружение..."
 python3 -m venv venv
 source venv/bin/activate
-echo -e "${GREEN}✅ Виртуальное окружение создано${NC}"
-echo ""
-
-# 5. Установка зависимостей
-echo "5️⃣  Установка зависимостей..."
-pip install --upgrade pip
 pip install -r requirements.txt
-echo -e "${GREEN}✅ Зависимости установлены${NC}"
+
 echo ""
+echo "👤 Определяем текущего пользователя..."
+CURRENT_USER=$(whoami)
+HOME_DIR=$(eval echo ~$CURRENT_USER)
 
-# 6. Настройка systemd service
-echo "6️⃣  Настройка systemd service..."
+echo "   Username: $CURRENT_USER"
+echo "   Home dir: $HOME_DIR"
 
-# Создаем service файл с правильными путями
-cat > lamoda-monitor.service << EOF
-[Unit]
-Description=Lamoda Monitor Bot - New Products Notifier
-After=network.target
+# Обновляем service файл с правильными путями
+echo "⚙️  Настраиваем systemd service..."
+sed -i "s|YOUR_USERNAME|$CURRENT_USER|g" lamoda-monitor.service
+sed -i "s|/home/YOUR_USERNAME|$HOME_DIR|g" lamoda-monitor.service
 
-[Service]
-Type=simple
-User=$CURRENT_USER
-WorkingDirectory=$WORK_DIR
-ExecStart=$WORK_DIR/venv/bin/python $WORK_DIR/lamoda_monitor_bot.py
-Restart=always
-RestartSec=10
-
-# Логирование
-StandardOutput=append:$WORK_DIR/bot_output.log
-StandardError=append:$WORK_DIR/bot_error.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-echo "   Копируем service в systemd..."
+echo "📋 Устанавливаем service..."
 sudo cp lamoda-monitor.service /etc/systemd/system/
 sudo systemctl daemon-reload
-echo -e "${GREEN}✅ Service настроен${NC}"
-echo ""
-
-# 7. Включение и запуск
-echo "7️⃣  Запуск бота..."
 sudo systemctl enable lamoda-monitor
+
+echo ""
+echo "🧪 Тестируем бота..."
+python test_bot.py
+
+echo ""
+echo "🚀 Запускаем бота как сервис..."
 sudo systemctl start lamoda-monitor
-echo -e "${GREEN}✅ Бот запущен!${NC}"
-echo ""
 
-# 8. Проверка статуса
-echo "8️⃣  Проверка статуса..."
-sleep 2
-sudo systemctl status lamoda-monitor --no-pager
 echo ""
+echo "✅ Проверяем статус..."
+sudo systemctl status lamoda-monitor --no-pager -l
 
-echo "============================================"
-echo "🎉 ДЕПЛОЙ ЗАВЕРШЕН!"
-echo "============================================"
+echo ""
+echo "================================"
+echo "✅ УСТАНОВКА ЗАВЕРШЕНА!"
+echo "================================"
 echo ""
 echo "📊 Полезные команды:"
-echo "   Статус:      sudo systemctl status lamoda-monitor"
-echo "   Логи:        tail -f $WORK_DIR/lamoda_monitor.log"
-echo "   Остановить:  sudo systemctl stop lamoda-monitor"
-echo "   Запустить:   sudo systemctl start lamoda-monitor"
-echo "   Рестарт:     sudo systemctl restart lamoda-monitor"
-echo ""
-echo "📱 Проверьте Telegram - должно прийти сообщение о запуске!"
+echo "  sudo systemctl status lamoda-monitor  # Статус"
+echo "  tail -f ~/Lamoda_bot/lamoda_monitor.log  # Логи"
+echo "  sudo systemctl restart lamoda-monitor  # Перезапуск"
 echo ""
 
+ENDSSH
+
+echo ""
+echo "🎉 ВСЁ ГОТОВО!"
+echo ""
+echo "Бот работает на сервере 24/7"
+echo "Проверьте Telegram - должно прийти сообщение о запуске"
+echo ""
+
+# Удаляем временный архив
+rm /Users/kotovod/Desktop/Lamoda_bot_deploy.tar.gz
+
+echo "💡 Для просмотра логов подключитесь к серверу:"
+echo "   ssh -p $SERVER_PORT $SERVER_USER@$SERVER_IP"
+echo "   tail -f ~/Lamoda_bot/lamoda_monitor.log"
